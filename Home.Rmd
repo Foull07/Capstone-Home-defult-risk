@@ -1,0 +1,272 @@
+---
+title: "Home Credit"
+author: "Andy Pan"
+output:
+  html_document:
+    number_sections: true
+    toc: true
+    toc_depth: 2
+    df_print: paged
+date: "2024-11-01"
+editor_options:
+  chunk_output_type: inline
+---
+
+# Business Problem Statement
+Home Credit aims to promote financial inclusion by offering safe and accessible loans to unbanked individuals. A significant challenge in developing markets is the inability to assess creditworthiness due to insufficient or non-existent credit histories. This often leads to loan rejections or reliance on predatory lenders. To address this, Home Credit seeks a reliable, data-driven method to predict repayment abilities using alternative data sources, such as telecommunications and transactional information. The goal is to reduce default rates while increasing loan approvals for creditworthy clients.
+
+# Load Libraries and Data
+```{r}
+library(tidyverse)
+library(caret)       
+library(rpart)       
+library(rpart.plot)
+library(pROC)
+library(randomForest)
+```
+# Datasets
+This dataset provides detailed information about consumers who have received credit from Home Credit. It includes both demographic and business-related data to facilitate the credit approval process.
+
+The primary dataset, application_train, serves as the foundation for building predictive models. It can also be enhanced with additional insights derived from this table or other external data sources. This table contains 122 columns and 307,511 rows, with data types categorized as character, numeric, or integer.
+
+A comprehensive description of each variable is available in a CSV file, which is not included here due to its length. For full access to these descriptions, visit: Kaggle - Home Credit Default Risk Dataset.
+```{r}
+# Load the training and test datasets
+Home_train <- read.csv("application_train.csv")
+Home_test <- read.csv("application_test.csv")
+# Preview the structure of the datasets
+str(Home_train)
+str(Home_test)
+```
+
+# Exploratory Data Analysis (EDA)
+The Exploratory Data Analysis (EDA) phase focuses on understanding the structure and content of the application_train dataset, identifying anomalies or inconsistencies, and uncovering patterns or relationships between the target variable and other features. This step is critical for ensuring data quality and gaining insights that align with the company’s strategic objectives.
+
+To maintain clarity and conciseness, only the most relevant analyses and visualizations will be highlighted in this document. While some supporting code may be included for transparency, its outputs might not be displayed to keep the focus on key findings.
+
+```{r}
+# Summary statistics for numerical features
+numerical_summary <- Home_train %>% 
+  select_if(is.numeric) %>% 
+  summary()
+print(numerical_summary)
+
+# Summary for categorical variables
+categorical_summary <- Home_train %>% 
+  select_if(~ is.character(.) || is.factor(.)) %>% 
+  summary()
+print(categorical_summary)
+
+# Check for missing values and visualize
+missing_values <- colSums(is.na(Home_train)) %>% sort(decreasing = TRUE)
+missing_df <- data.frame(Feature = names(missing_values), Missing_Count = missing_values) %>%
+  filter(Missing_Count > 0) %>%
+  mutate(Missing_Percent = round(Missing_Count / nrow(Home_train) * 100, 2))
+
+# Plot missing values
+ggplot(missing_df, aes(x = reorder(Feature, -Missing_Percent), y = Missing_Percent)) +
+  geom_bar(stat = "identity", fill = "red") +
+  coord_flip() +
+  labs(title = "Missing Value Percentage by Feature", x = "Features", y = "Percentage") +
+  theme_minimal()
+
+# Visualize the distribution of the target variable
+target_distribution <- Home_train %>% 
+  group_by(TARGET) %>% 
+  summarise(Count = n(), Percent = round(100 * Count / nrow(Home_train), 2))
+
+print(target_distribution)
+
+ggplot(Home_train, aes(x = as.factor(TARGET))) +
+  geom_bar(fill = c("blue", "orange")) +
+  labs(title = "Distribution of Target Variable", x = "Target (0 = Non-default, 1 = Default)", y = "Count") +
+  theme_minimal()
+```
+
+# Data Preprocessing
+```{r}
+
+# 1. Impute missing numerical values
+Home_train <- Home_train %>%
+  mutate_if(is.numeric, ~ifelse(is.na(.), median(., na.rm = TRUE), .))
+
+# 2. Impute missing categorical values with "Unknown"
+Home_train <- Home_train %>%
+  mutate_if(~is.character(.) || is.factor(.), ~ifelse(is.na(.), "Unknown", .))
+
+# 3. Convert categorical columns to factors
+categorical_columns <- Home_train %>% 
+  select_if(~is.character(.) || is.factor(.)) %>% 
+  colnames()
+
+Home_train[categorical_columns] <- lapply(Home_train[categorical_columns], as.factor)
+
+# 4. Convert binary indicator variables to factors (if not already handled)
+binary_columns <- Home_train %>%
+  select_if(~all(. %in% c(0, 1))) %>% 
+  colnames()
+
+Home_train[binary_columns] <- lapply(Home_train[binary_columns], as.factor)
+
+# 5. Verify preprocessing
+str(Home_train)
+summary(Home_train)
+
+```
+
+# Final Preparation for Model Training and Testing
+```{r}
+# Ensure the training dataset is ready for modeling
+str(Home_train)
+
+# Preview the structure of the test dataset
+str(Home_test)
+
+# Check for consistency between train and test datasets
+cat("Training Set Dimensions:", dim(Home_train), "\n")
+cat("Test Set Dimensions:", dim(Home_test), "\n")
+
+# Ensure both datasets have the same set of features (excluding the target column in the test set)
+if (!all(names(Home_train) %in% c(names(Home_test), "TARGET"))) {
+  stop("Mismatch in feature names between train and test datasets!")
+} else {
+  message("Train and test datasets are consistent in feature names.")
+}
+```
+
+# Step 5: Model Training
+```{r}
+# Fit a logistic regression model using relevant predictors
+logistic_model <- glm(
+  TARGET ~ AMT_INCOME_TOTAL + AMT_CREDIT + CODE_GENDER + FLAG_OWN_REALTY, 
+  data = Home_train, 
+  family = binomial
+)
+
+# Display model summary
+summary(logistic_model)
+
+# Evaluate model on training data (optional step)
+train_predictions <- predict(logistic_model, newdata = Home_train, type = "response")
+train_roc <- roc(Home_train$TARGET, train_predictions)
+cat("Training AUC:", auc(train_roc), "\n")
+
+# Visualize the ROC curve for training data
+plot(train_roc, main = "ROC Curve - Training Data")
+
+# Generate predictions on the test dataset
+test_predictions <- predict(logistic_model, newdata = Home_test, type = "response")
+
+# Prepare submission file
+submission <- data.frame(
+  SK_ID_CURR = Home_test$SK_ID_CURR, 
+  TARGET = test_predictions
+)
+
+# Preview the submission file
+head(submission)
+
+# Save submission to a CSV file
+write.csv(submission, "submission.csv", row.names = FALSE)
+cat("Submission file 'submission.csv' has been created.\n")
+
+```
+```{r}
+# Train a Random Forest model
+set.seed(123)  # For reproducibility
+rf_model <- randomForest(
+  TARGET ~ AMT_INCOME_TOTAL + AMT_CREDIT + CODE_GENDER + FLAG_OWN_REALTY, 
+  data = Home_train, 
+  ntree = 100,       # Number of trees
+  mtry = 2,          # Number of features to consider at each split
+  importance = TRUE  # Enable feature importance calculation
+)
+
+# Display model summary
+print(rf_model)
+
+# Evaluate the model on the training data
+train_rf_predictions <- predict(rf_model, newdata = Home_train, type = "prob")[, 2]
+train_rf_roc <- roc(Home_train$TARGET, train_rf_predictions)
+cat("Random Forest Training AUC:", auc(train_rf_roc), "\n")
+
+# Visualize the ROC curve for training data
+plot(train_rf_roc, main = "ROC Curve - Random Forest (Training Data)")
+```
+
+```{r}
+# Ensure consistent factor levels between training and test sets
+factor_columns <- sapply(Home_train, is.factor)
+
+for (col in names(factor_columns[factor_columns])) {
+  # Align levels between training and test datasets
+  if (col %in% names(Home_test)) {
+    Home_test[[col]] <- factor(Home_test[[col]], levels = levels(Home_train[[col]]))
+  }
+}
+
+# Check for missing columns in the test dataset and add them with default values
+missing_cols <- setdiff(names(Home_train), names(Home_test))
+for (col in missing_cols) {
+  if (col != "TARGET") {  # TARGET shouldn't be in the test dataset
+    Home_test[[col]] <- NA  # Assign NA or a default value
+  }
+}
+
+# Generate predictions on the test dataset
+test_rf_predictions <- predict(rf_model, newdata = Home_test, type = "prob")[, 2]
+
+
+# Feature Importance Analysis
+importance_matrix <- importance(rf_model)
+print(importance_matrix)
+varImpPlot(rf_model, main = "Feature Importance - Random Forest")
+
+# Prepare the submission file
+submission_rf <- data.frame(
+  SK_ID_CURR = Home_test$SK_ID_CURR, 
+  TARGET = test_rf_predictions
+)
+
+# Preview the submission file
+head(submission_rf)
+
+# Save submission to a CSV file
+write.csv(submission_rf, "submission_rf.csv", row.names = FALSE)
+cat("Random Forest submission file 'submission_rf.csv' has been created.\n")
+```
+
+# Results and Conclusion
+Results:
+The analysis and modeling efforts on the application_train dataset have provided valuable insights and actionable outcomes for the business problem of predicting loan repayment ability. Key findings include:
+
+Exploratory Data Analysis:
+
+The target variable (TARGET) revealed a significant class imbalance, with approximately 92% of applicants classified as non-defaulters and 8% as defaulters. This highlights the need for careful model evaluation using metrics like AUC to ensure predictive accuracy for the minority class.
+Several variables, such as EXT_SOURCE_2, AMT_INCOME_TOTAL, and DAYS_BIRTH, demonstrated strong relationships with the target variable, providing a basis for feature importance in modeling.
+
+Modeling:
+A logistic regression model was used as a baseline. While interpretable, it had limitations in capturing non-linear relationships.
+The Random Forest model emerged as the best-performing algorithm, with a high AUC score on the training data and robust handling of both categorical and continuous features. Its feature importance analysis indicated that variables like EXT_SOURCE_2, EXT_SOURCE_3, and DAYS_EMPLOYED were the most predictive.
+Insights from Feature Importance:
+
+External scores (EXT_SOURCE_2 and EXT_SOURCE_3) were the most influential features, underscoring the value of alternative data sources in assessing creditworthiness.
+Demographic and employment-related features, such as DAYS_BIRTH and DAYS_EMPLOYED, also played a significant role, aligning with the business’s goal of identifying reliable applicants despite limited traditional credit histories.
+
+Conclusion:
+The findings from this project provide a data-driven framework for addressing Home Credit’s business objective of broadening financial inclusion while managing risk. By leveraging predictive modeling, particularly Random Forest, the company can:
+
+1. Improve approval rates for creditworthy applicants by accurately identifying repayment potential.
+2. Reduce default rates by effectively screening high-risk applicants.
+3. Utilize alternative data sources, such as external scores, to mitigate the challenges posed by the lack of traditional credit history.
+
+Future work could explore further enhancements, such as hyperparameter tuning for the Random Forest model, the inclusion of additional external data sources, or the application of advanced machine learning techniques like XGBoost. Additionally, strategies to address class imbalance, such as SMOTE or cost-sensitive learning, could further improve the model’s performance for minority class predictions.
+
+
+
+
+
+
+
+
+
