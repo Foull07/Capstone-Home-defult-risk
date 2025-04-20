@@ -22,7 +22,7 @@ My primary contributions to the project included explaining the predictive model
 ## Lessons Learned
 This project enhanced my understanding of data preprocessing, particularly in addressing missing values and outliers. I gained practical experience in feature engineering, model evaluation, and hyperparameter tuning. Additionally, I learned the importance of aligning machine learning solutions with business objectives to ensure actionable insights and measurable impact​
 
-- ## Contact
+## Contact
 For any inquiries, feel free to reach out:
 - **Name**: Andy Pan
 - <img src="https://github.com/user-attachments/assets/f93c176e-6343-4059-b163-708f9e07c329" alt="emoji" style="width: 1.3em; height: 1em; vertical-align: middle;">**Email**: andypan0825@gmail.com
